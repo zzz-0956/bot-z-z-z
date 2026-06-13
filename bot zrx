@@ -1,0 +1,253 @@
+import {
+  Client,
+  GatewayIntentBits,
+  ActivityType,
+  type Message,
+  PermissionsBitField,
+} from "discord.js";
+
+import { logger } from "./lib/logger";
+import { setupMusic, handleMusicCommand, getMusicCommands } from "./music";
+
+const PREFIX = "!";
+const spamMap = new Map<string, number>();
+const allowedRoleId = "1515114036528812164";
+
+// ================= CLEAN AUTO REPLIES =================
+function autoReply(msg: string): string | null {
+  const m = msg.toLowerCase();
+
+  if (m === "hello") return "hi";
+  if (m.includes("سارة")) return "سارة الافضل الفوخمه عمتكم جميعا";
+  if (m.includes("ميلو")) return "هلا مولاتي";
+  if (m.includes("ال كه")) return "عائلتي الخاصة احبكم";
+  if (m.includes("زر")) return "عمي تاج راسي ابوي يلي عملني المؤسس";
+  if (m.includes("همام")) return "ارحب رئيس دولة الحمبلة";
+  if (m.includes("هش")) return "يتم الهش";
+  if (m.includes("بكمي")) return "ايه والله شايف هذا بكمي يوع";
+  if (m.includes("يوع")) return "ايه يوع و وع و يع و اع وخله ياكل زق انا واقف معك";
+
+  if (m.trim() === "زر زهقن") {
+    return "شوفلك حل <@1452243553173373104>";
+  }
+
+  if (m.includes("مين قطوتي")) {
+    return "مياو ( ارد بس ل ال كه )";
+  }
+
+  return null;
+}
+
+// ================= BOT START =================
+export function startBot(): void {
+  const token = process.env["DISCORD_TOKEN"];
+
+  if (!token) {
+    logger.warn("DISCORD_TOKEN not set — bot not starting");
+    return;
+  }
+
+  const client = new Client({
+    intents: [
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMessages,
+      GatewayIntentBits.GuildMembers,
+      GatewayIntentBits.GuildVoiceStates,
+      GatewayIntentBits.MessageContent,
+    ],
+  });
+
+  // ================= READY FIXED =================
+  client.once("ready", async () => {
+    logger.info({ tag: client.user?.tag }, "Bot is online");
+
+    await setupMusic(client);
+
+    client.user?.setPresence({
+      status: "online",
+      activities: [
+        {
+          name: "عائلة ال كه ❤️ | المطور: زر",
+          type: ActivityType.Playing,
+        },
+      ],
+    });
+  });
+
+  // ================= MESSAGE HANDLER =================
+  client.on("messageCreate", async (message: Message) => {
+    if (message.author.bot) return;
+
+    const id = message.author.id;
+    const now = Date.now();
+    const last = spamMap.get(id);
+
+    // ================= ANTI SPAM =================
+    if (last && now - last < 2500) {
+      await message.delete().catch(() => {});
+      return void message.channel.send("توقف عن السبام").then(m => {
+        setTimeout(() => m.delete().catch(() => {}), 3000);
+      });
+    }
+
+    spamMap.set(id, now);
+
+    // cleanup memory
+    if (spamMap.size > 500) {
+      for (const [k, v] of spamMap) {
+        if (now - v > 60000) spamMap.delete(k);
+      }
+    }
+
+    const msg = message.content;
+    const msgLower = msg.toLowerCase();
+    const msgTrimmed = msg.trim();
+
+    // ================= PREFIX COMMANDS =================
+    if (msg.startsWith(PREFIX)) {
+      const args = msg.slice(PREFIX.length).trim().split(/ +/);
+      const command = args.shift()?.toLowerCase();
+
+      if (command && getMusicCommands().includes(command)) {
+        await handleMusicCommand(command, args, message);
+        return;
+      }
+
+      // kick
+      if (command === "kick") {
+        if (!message.inGuild()) return;
+        if (!message.member?.permissions.has(PermissionsBitField.Flags.KickMembers)) return;
+
+        const member = message.mentions.members?.first();
+        if (!member) return void message.reply("منشن الشخص");
+
+        await member.kick().catch(() => {});
+        return void message.reply(`تم طرد ${member.user.tag}`);
+      }
+
+      // ban
+      if (command === "ban") {
+        if (!message.inGuild()) return;
+        if (!message.member?.permissions.has(PermissionsBitField.Flags.BanMembers)) return;
+
+        const member = message.mentions.members?.first();
+        if (!member) return void message.reply("منشن الشخص");
+
+        await member.ban().catch(() => {});
+        return void message.reply(`تم حظر ${member.user.tag}`);
+      }
+
+      // lock
+      if (command === "lock") {
+        if (!message.inGuild()) return;
+        if (!message.member?.permissions.has(PermissionsBitField.Flags.ManageChannels)) return;
+
+        const channel = message.channel;
+        if (!channel.isTextBased() || channel.isDMBased()) return;
+
+        await channel.permissionOverwrites.edit(message.guild.roles.everyone, {
+          SendMessages: false,
+        });
+
+        return void message.reply("تم قفل الشات 🔒");
+      }
+
+      // unlock
+      if (command === "unlock") {
+        if (!message.inGuild()) return;
+        if (!message.member?.permissions.has(PermissionsBitField.Flags.ManageChannels)) return;
+
+        const channel = message.channel;
+        if (!channel.isTextBased() || channel.isDMBased()) return;
+
+        await channel.permissionOverwrites.edit(message.guild.roles.everyone, {
+          SendMessages: true,
+        });
+
+        return void message.reply("تم فتح الشات 🔓");
+      }
+
+      return;
+    }
+
+    // ================= SHORT COMMANDS =================
+    if (!message.inGuild()) return;
+
+    if (
+      msgTrimmed === "ق" ||
+      msgTrimmed === "ف" ||
+      msgTrimmed.startsWith("ط ") ||
+      msgTrimmed.startsWith("ب ") ||
+      msgTrimmed.startsWith("رول ") ||
+      msgTrimmed.startsWith("حذف ")
+    ) {
+      if (msgTrimmed === "ق") {
+        if (!message.member?.permissions.has(PermissionsBitField.Flags.ManageChannels)) return;
+
+        const channel = message.channel;
+        if (!channel.isTextBased()) return;
+
+        await channel.permissionOverwrites.edit(message.guild.roles.everyone, {
+          SendMessages: false,
+        });
+
+        return void message.reply("تم قفل الشات");
+      }
+
+      if (msgTrimmed === "ف") {
+        if (!message.member?.permissions.has(PermissionsBitField.Flags.ManageChannels)) return;
+
+        const channel = message.channel;
+        if (!channel.isTextBased()) return;
+
+        await channel.permissionOverwrites.edit(message.guild.roles.everyone, {
+          SendMessages: true,
+        });
+
+        return void message.reply("تم فتح الشات");
+      }
+
+      if (msgTrimmed.startsWith("رول ")) {
+        if (!message.member?.permissions.has(PermissionsBitField.Flags.ManageRoles)) return;
+
+        const member = message.mentions.members?.first();
+        const role = message.mentions.roles.first();
+
+        if (!member || !role) return void message.reply("منشن العضو والرول");
+
+        await member.roles.add(role);
+        return void message.channel.send(`تم إعطاء ${role.name}`);
+      }
+
+      if (msgTrimmed.startsWith("حذف ")) {
+        if (!message.member?.permissions.has(PermissionsBitField.Flags.ManageMessages)) return;
+
+        const amount = Number(msgTrimmed.split(" ")[1]);
+        if (isNaN(amount) || amount < 1 || amount > 100) {
+          return void message.reply("1 - 100 فقط");
+        }
+
+        const channel = message.channel;
+        if (!channel.isTextBased()) return;
+
+        await channel.bulkDelete(amount, true);
+        return void message.channel.send(`تم حذف ${amount} رسالة`);
+      }
+
+      return;
+    }
+
+    // ================= ROLE LOCKED AUTO REPLIES =================
+    if (!message.member.roles.cache.has(allowedRoleId)) return;
+
+    const reply = autoReply(msg);
+
+    if (reply) {
+      message.reply(reply).catch(() => {});
+    }
+  });
+
+  client.login(token).catch((err) => {
+    logger.error({ err }, "Login failed");
+  });
+}
